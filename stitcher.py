@@ -34,6 +34,7 @@ class StitchResult:
     inliers: list[int] = field(default_factory=list)           # 每段相鄰匹配的 inlier 數
     rolls: list[float] = field(default_factory=list)          # 度：H 面內旋轉分量直讀
     pitches: list[float] = field(default_factory=list)        # 度：垂直位移代理量（近似）
+    seam: str = "voronoi"           # none | voronoi | dp（手刻鏈用）
     method: str = "manual"          # manual_* | stitcher_fallback
     feature: str = "sift"           # sift | orb（手刻鏈用；fallback 為 stitcher-internal）
     work_width: int = 1240
@@ -189,27 +190,63 @@ def _warp_and_masks(images: list[np.ndarray], H_globals: list[np.ndarray],
     return warped, masks
 
 
-def _blend_gain_multiband(warped: list[np.ndarray], masks: list[np.ndarray]) -> tuple[np.ndarray, list[float]]:
-    """Gain 補償 + MultiBandBlender，applies in place on copies."""
-    h, w = warped[0].shape[:2]
+def _find_seams(images: list[np.ndarray], masks: list[np.ndarray],
+                 kind: str = "voronoi") -> list[np.ndarray]:
+    """縫線搜尋：把重疊區的每個像素判給單一張影像，回傳裁切後的 masks.
+
+    全重疊融合是重影主因——錯位幾個 px 就糊成雙影；縫線讓每像素只取自一張圖，
+    接縫藏在重疊中線處，再交給 Multiband 做窄帶羽化。
+    實作：全域最近中心 Voronoi——每像素判給「mask 質心最近且有覆蓋」者。
+    不採用 cv2.detail VoronoiSeamFinder：實測該 binding 回傳 UMat，
+    且 pairwise 侵蝕會把中間影像吃到剩數千 px 並產生破洞（union 不守恆），
+    自行實作保證「聯集守恆、每像素恰屬一圖」，確定性可除錯。
+    kind: none=關閉（舊行為，全區混合）| voronoi=中線縫（預設）。
+    """
+    if kind == "none":
+        return masks
+    if kind != "voronoi":
+        raise ValueError(f"未知縫線：{kind}（可選 none / voronoi）")
+    h, w = masks[0].shape
+    cov = np.stack([(m > 0) for m in masks])          # (n,h,w) 是否覆蓋
+    cx = np.array([np.where(m > 0)[1].mean() for m in masks])  # 質心 x
+    cy = np.array([np.where(m > 0)[0].mean() for m in masks])  # 質心 y
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    d2 = (xx[None, :, :] - cx[:, None, None]) ** 2 + (yy[None, :, :] - cy[:, None, None]) ** 2
+    d2 = np.where(cov, d2, np.inf)
+    best = d2.argmin(axis=0)
+    has = cov.any(axis=0)
+    return [(((best == i) & has).astype(np.uint8) * 255) for i in range(len(masks))]
+
+
+def _compensate_gain(warped: list[np.ndarray], masks: list[np.ndarray],
+                     blocks: bool = False) -> tuple[list[np.ndarray], list[float]]:
+    """增益補償（必須用完整重疊 mask 餵入，才能估出增益；縫線裁切在其之後做）.
+
+    blocks=False: 全圖單一增益（GAIN）；True: 分塊增益（GAIN_BLOCKS），
+    可處理圖內亮度梯度（如天空與地面曝光趨勢不同），代價是計算稍慢。
+    回報的 gain 取各塊平均，僅供顯示參考。
+    """
     corners = [(0, 0)] * len(warped)
-    sizes = [(w, h)] * len(warped)
-    comp = cv2.detail.ExposureCompensator_createDefault(
-        cv2.detail.ExposureCompensator_GAIN)
+    kind = (cv2.detail.ExposureCompensator_GAIN_BLOCKS if blocks
+            else cv2.detail.ExposureCompensator_GAIN)
+    comp = cv2.detail.ExposureCompensator_createDefault(kind)
     comp.feed(corners, warped, masks)
-    gains = [float(np.asarray(comp.getMatGains()[i]).ravel()[0]) for i in range(len(warped))]
+    gains = [float(np.mean(np.asarray(comp.getMatGains()[i]))) for i in range(len(warped))]
     compensated = [comp.apply(i, corners[i], warped[i], masks[i]) for i in range(len(warped))]
+    return compensated, gains
+
+
+def _blend_multiband(images: list[np.ndarray], masks: list[np.ndarray]) -> np.ndarray:
+    """多頻段融合（輸入應為縫線裁切後的 masks，重疊區只做窄帶羽化）."""
+    h, w = images[0].shape[:2]
+    # 注意：此 binding 的 MultiBandBlender 建構子會接受 num_bands 參數但實際忽略
+    # （實測 bands=5/2/1 輸出逐像素相同），故直接用預設層數，不再對外暴露層數選項。
     blender = cv2.detail.Blender_createDefault(cv2.detail.Blender_MULTI_BAND)
-    try:  # num_bands 預設 5 在部分版本需 setNumBands
-        blender.setNumBands(5)
-    except Exception:
-        pass
-    blender.prepare(corners, sizes)
-    for img, m in zip(compensated, masks):
+    blender.prepare([(0, 0)] * len(images), [(w, h)] * len(images))
+    for img, m in zip(images, masks):
         blender.feed(img.astype(np.int16), m, (0, 0))
     res, _ = blender.blend(None, None)
-    pano = np.clip(res, 0, 255).astype(np.uint8)
-    return pano, gains
+    return np.clip(res, 0, 255).astype(np.uint8)
 
 
 def _blend_naive_average(warped: list[np.ndarray], masks: list[np.ndarray]) -> tuple[np.ndarray, list[float]]:
@@ -259,7 +296,9 @@ def _chain_and_canvas(images: list[np.ndarray], rel_H: list[np.ndarray],
 
 def stitch_manual(images: list[np.ndarray], filenames: list[str],
                   work_width: int, color_balance: bool,
-                  ratio: float = 0.75, feature: str = "sift") -> StitchResult:
+                  ratio: float = 0.75, feature: str = "sift",
+                  seam: str = "voronoi",
+                  gain_blocks: bool = False) -> StitchResult:
     n = len(images)
     if n < 2:
         raise ValueError("至少需要 2 張影像")
@@ -297,9 +336,13 @@ def stitch_manual(images: list[np.ndarray], filenames: list[str],
 
     warped, masks = _warp_and_masks(images, H_globals, W, Hc)
     if color_balance:
-        pano, gains = _blend_gain_multiband(warped, masks)
+        # 增益用完整重疊估計 → 縫線裁切重疊區 → 窄帶融合
+        compensated, gains = _compensate_gain(warped, masks, blocks=gain_blocks)
+        seam_masks = _find_seams(compensated, masks, seam)
+        pano = _blend_multiband(compensated, seam_masks)
     else:
-        pano, gains = _blend_naive_average(warped, masks)
+        seam_masks = _find_seams(warped, masks, seam)
+        pano, gains = _blend_naive_average(warped, seam_masks)
 
     pano_cropped, offset = _crop_black_border(pano, masks)
     ox, oy = int(offset[0]), int(offset[1])
@@ -317,7 +360,7 @@ def stitch_manual(images: list[np.ndarray], filenames: list[str],
                         scales=scales, yaws=yaws, gains=gains,
                         inliers=inlier_list, method=method_used,
                         feature=feature.lower(), rolls=rolls, pitches=pitches,
-                        work_width=work_width, canvas_size=(W, Hc))
+                        seam=seam, work_width=work_width, canvas_size=(W, Hc))
 
 
 # ----------------------------------------------------------------------------
@@ -368,14 +411,18 @@ def stitch_fallback(images: list[np.ndarray], filenames: list[str],
 # ----------------------------------------------------------------------------
 def stitch_folder(folder: str, work_width: int = 1240,
                   color_balance: bool = True, ratio: float = 0.75,
-                  method: str = "auto", feature: str = "sift") -> StitchResult:
+                  method: str = "auto", feature: str = "sift",
+                  seam: str = "voronoi",
+                  gain_blocks: bool = False) -> StitchResult:
     """method: auto=手刻優先、失敗轉 Stitcher；manual=只用手刻鏈；stitcher=只用 Stitcher.
-    feature: sift | orb，手刻鏈的特徵器（fallback 內部管線不受影響）。"""
+    feature: sift | orb，手刻鏈的特徵器（fallback 內部管線不受影響）。
+    seam: none | voronoi，手刻鏈重疊區中線縫（消除重影的關鍵）。"""
     images, filenames = load_images_sorted(folder, work_width)
     if method == "stitcher":
         return stitch_fallback(images, filenames, work_width, color_balance)
     try:
-        return stitch_manual(images, filenames, work_width, color_balance, ratio, feature)
+        return stitch_manual(images, filenames, work_width, color_balance, ratio,
+                             feature, seam, gain_blocks)
     except Exception as e:
         if method == "manual":
             raise

@@ -31,8 +31,10 @@
 
 **色彩＋融合**
 
-- ON：`GainCompensator`＋`MultiBandBlender`
+- ON：`GainCompensator`＋中線縫＋`MultiBandBlender`
 - OFF：重疊區算術平均（對照用）
+- 縫線：重疊區每像素只取一張圖（最近 mask 質心者），消除錯位重影；
+  自行實作（`stitcher._find_seams`，聯集守恆），`--seam none` 可關閉對照
 
 ## 環境安裝
 
@@ -66,4 +68,6 @@ python main.py --cli --method stitcher --save pano_st.jpg
 | `--width` | 工作寬度 px（預設 1240）：先等比縮圖再拼接，越大越細但越慢 |
 | `--method` | `auto`（手刻優先、失敗轉 Stitcher）／`manual`／`stitcher` |
 | `--feature` | 手刻鏈特徵器：`sift`（預設，精確）／`orb`（快速預覽） |
+| `--seam` | 重疊縫線：`voronoi`（預設，中線縫）／`none`（關閉對照） |
+| `--gain-blocks` | 分塊增益（抗圖內亮度梯度；本組效果有限，預設關） |
 | `--no-balance` | 關閉色彩平衡，改簡單平均（接縫對照用） |

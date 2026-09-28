@@ -32,16 +32,22 @@ def parse_args():
                    help="拼接方法 (預設 auto)")
     p.add_argument("--feature", default="sift", choices=["sift", "orb"],
                    help="手刻鏈特徵器 (預設 sift；orb=Oriented FAST and Rotated BRIEF，較快)")
+    p.add_argument("--seam", default="voronoi", choices=["voronoi", "none"],
+                   help="手刻鏈縫線 (預設 voronoi 中線縫；none=關閉，全區混合)")
+    p.add_argument("--gain-blocks", action="store_true",
+                   help="分塊增益 (抗圖內亮度梯度，如天空與地面趨勢不同)")
     p.add_argument("--gui", action="store_true", help="強制 GUI 模式")
     return p.parse_args()
 
 
-def run_cli(folder: str, width: int, balance: bool, save: str, method: str, feature: str):
+def run_cli(folder: str, width: int, balance: bool, save: str, method: str, feature: str, seam: str,
+            gain_blocks: bool):
     res = stitch_folder(folder, work_width=width, color_balance=balance,
-                        method=method, feature=feature)
+                        method=method, feature=feature, seam=seam,
+                        gain_blocks=gain_blocks)
     cv2.imwrite(save, res.panorama)
     print(f"尺寸: {res.panorama.shape[1]}x{res.panorama.shape[0]}")
-    print(f"方法: {res.method} / 特徵: {res.feature}")
+    print(f"方法: {res.method} / 特徵: {res.feature} / 縫線: {res.seam}")
     for i, n in enumerate(res.filenames):
         print(f"[{i}] {n} scale={res.scales[i]:.4f} yaw={res.yaws[i]:+.2f}deg "
               f"roll={res.rolls[i]:+.2f}deg pitch~{res.pitches[i]:+.2f}deg gain={res.gains[i]:.4f}")
@@ -55,7 +61,8 @@ def main():
     args = parse_args()
     balance = not args.no_balance
     if args.cli:
-        run_cli(args.folder, args.width, balance, args.save, args.method, args.feature)
+        run_cli(args.folder, args.width, balance, args.save, args.method, args.feature, args.seam,
+                args.gain_blocks)
     else:
         from gui import StitchApp
         app = StitchApp(init_folder=args.folder)

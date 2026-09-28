@@ -377,7 +377,7 @@ class StitchApp(tk.Tk):
         self.redraw()
         self.draw_views()
         inl = "/".join(map(str, res.inliers)) if res.inliers else "-"
-        self.set_info(f"方法: {res.method}\n特徵: {res.feature}\n全景: {res.panorama.shape[1]}x{res.panorama.shape[0]}\n"
+        self.set_info(f"方法: {res.method}\n特徵: {res.feature} / 縫線: {res.seam}\n全景: {res.panorama.shape[1]}x{res.panorama.shape[0]}\n"
                       f"inliers(相鄰段): {inl}\n"
                       f"gains: {' '.join(f'{g:.3f}' for g in res.gains)}\n"
                       f"色彩平衡: {'ON' if self.balance_var.get() else 'OFF'}")
