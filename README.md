@@ -24,6 +24,11 @@
 - 優先 `findHomography`＋RANSAC（8 自由度含透視）
 - 發散時轉 `estimateAffinePartial2D`＋RANSAC（4 自由度：旋轉＋等比縮放＋平移）
 
+**姿態逆推（yaw／roll／pitch）**
+
+- yaw：多邊形中心水平位移近似；roll：H 面內旋轉分量直讀；
+  pitch：垂直位移代理量（皆未標定，近似值）。GUI 另有 yaw-pitch 側視圖
+
 **色彩＋融合**
 
 - ON：`GainCompensator`＋`MultiBandBlender`

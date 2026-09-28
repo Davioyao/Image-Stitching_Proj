@@ -32,6 +32,8 @@ class StitchResult:
     yaws: list[float] = field(default_factory=list)            # 度，近似值
     gains: list[float] = field(default_factory=list)
     inliers: list[int] = field(default_factory=list)           # 每段相鄰匹配的 inlier 數
+    rolls: list[float] = field(default_factory=list)          # 度：H 面內旋轉分量直讀
+    pitches: list[float] = field(default_factory=list)        # 度：垂直位移代理量（近似）
     method: str = "manual"          # manual_* | stitcher_fallback
     feature: str = "sift"           # sift | orb（手刻鏈用；fallback 為 stitcher-internal）
     work_width: int = 1240
@@ -121,6 +123,25 @@ def homography_scale(H: np.ndarray) -> float:
     Hn = H / (H[2, 2] if abs(H[2, 2]) > 1e-9 else 1.0)
     M = Hn[:2, :2]
     return float(math.sqrt(abs(float(np.linalg.det(M)))))
+
+
+def compute_roll_pitch(H_list: list[np.ndarray], polygons: list[np.ndarray],
+                       ref_idx: int, work_width: int) -> tuple[list[float], list[float]]:
+    """由全域 H 與多邊形中心推 roll / pitch（階段四延伸）。
+
+    roll: H 線性部分的面內旋轉角 θ=atan2(M10, M00)，y-down 座標下正值為順時針。
+      affine 鏈直接可讀；注意它混入了透視/剪切效應，是「鏈內 roll」而非標定級真值。
+    pitch: 無內參時無法分離俯仰旋轉與垂直平移，故與 yaw 同級近似：
+      pitch_i = atan2(cy_i − cy_ref, f)，f 與 yaw 共用同一焦距假設。
+    """
+    rolls = []
+    for H in H_list:
+        M = H[:2, :2] / (H[2, 2] if abs(H[2, 2]) > 1e-9 else 1.0)
+        rolls.append(float(math.degrees(math.atan2(float(M[1, 0]), float(M[0, 0])))))
+    f = (work_width / 2.0) / math.tan(math.radians(25.0))
+    cys = [float(np.mean(p[:, 1])) for p in polygons]
+    pitches = [float(math.degrees(math.atan2(c - cys[ref_idx], f))) for c in cys]
+    return rolls, pitches
 
 
 def estimate_yaws(polygons: list[np.ndarray], ref_idx: int, work_width: int) -> list[float]:
@@ -289,12 +310,13 @@ def stitch_manual(images: list[np.ndarray], filenames: list[str],
     H_globals = [Tc @ H for H in H_globals]
     scales = [homography_scale(H) for H in H_to_ref]  # 縮放與平移無關，用未平移版
     yaws = estimate_yaws(polygons, ref, images[0].shape[1])
+    rolls, pitches = compute_roll_pitch(H_to_ref, polygons, ref, images[0].shape[1])
 
     return StitchResult(panorama=pano_cropped, filenames=filenames,
                         H_globals=H_globals, polygons=polygons,
                         scales=scales, yaws=yaws, gains=gains,
                         inliers=inlier_list, method=method_used,
-                        feature=feature.lower(),
+                        feature=feature.lower(), rolls=rolls, pitches=pitches,
                         work_width=work_width, canvas_size=(W, Hc))
 
 
@@ -333,10 +355,11 @@ def stitch_fallback(images: list[np.ndarray], filenames: list[str],
     for poly in polygons:
         cx = float(poly[:, 0].mean())
         yaws.append(float(math.degrees(math.atan2(cx - cx_ref, f))))
+    rolls, pitches = compute_roll_pitch(Hg, polygons, n // 2, work_width)  # Hg=單位陣列→roll 全 0
     return StitchResult(panorama=pano, filenames=filenames, H_globals=Hg,
                         polygons=polygons, scales=scales, yaws=yaws,
                         gains=[1.0] * n, inliers=[], method="stitcher_fallback",
-                        feature="stitcher-internal",
+                        feature="stitcher-internal", rolls=rolls, pitches=pitches,
                         work_width=work_width, canvas_size=(W, H))
 
 

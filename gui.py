@@ -146,6 +146,87 @@ class RadarView(tk.Canvas):
         self.create_oval(cx - 5, cy - 5, cx + 5, cy + 5, fill="white", outline="black")
 
 
+class SideView(tk.Canvas):
+    """側視圖：橫軸=yaw（拍攝方向），縱軸=pitch 代理量（上下俯仰）。
+
+    俯視雷達只表達 yaw；pitch 是面外角，必須用側視才看得見。
+    基準圖 (yaw=0, pitch=0) 落在原點；水平灰線為 pitch=0。
+    """
+
+    def __init__(self, master, width: int = 220, height: int = 110):
+        super().__init__(master, width=width, height=height, bg="#111418",
+                         highlightthickness=1, highlightbackground="#444")
+        self.w, self.h = width, height
+
+    def draw(self, yaws: list[float], pitches: list[float], colors: list[str],
+             selected: int = -1):
+        self.delete("all")
+        L, Rr, T, B = 30, 8, 8, 14
+        pw, ph = self.w - L - Rr, self.h - T - B
+        yaw_span = max(max(yaws) - min(yaws), 10.0)
+        x0, x1 = min(yaws) - yaw_span * 0.15, max(yaws) + yaw_span * 0.15
+        pmax = max(max(abs(p) for p in pitches), 5.0) * 1.25
+
+        def X(yaw):
+            return L + (yaw - x0) / (x1 - x0) * pw
+
+        def Y(p):
+            return T + (1 - (p + pmax) / (2 * pmax)) * ph
+
+        self.create_line(L, Y(0), L + pw, Y(0), fill="#3a4552")  # pitch=0 基準線
+        self.create_text(L - 4, Y(0), text="0°", fill="#8b95a1",
+                         font=("Arial", 7), anchor=tk.E)
+        self.create_text(L - 4, T + 2, text=f"+{pmax:.0f}°", fill="#5b6672",
+                         font=("Arial", 7), anchor=tk.E)
+        for i, (yaw, p) in enumerate(zip(yaws, pitches)):
+            x, y = X(yaw), Y(p)
+            col = colors[i % len(colors)]
+            r = 6 if i == selected else 4
+            self.create_oval(x - r, y - r, x + r, y + r, fill=col,
+                             outline="white" if i == selected else "black",
+                             width=2 if i == selected else 1)
+            self.create_text(x, y - 10, text=str(i), fill="white",
+                             font=("Arial", 7, "bold"))
+        self.create_text(L + pw, self.h - 4, text="yaw→", fill="#5b6672",
+                         font=("Arial", 7), anchor=tk.SE)
+
+
+def side_to_image(yaws: list[float], pitches: list[float], colors: list[str],
+                  selected: int = -1, width: int = 800, height: int = 400) -> Image.Image:
+    """側視圖 PIL 版（存檔用），與 SideView 同一映射."""
+    img = Image.new("RGB", (width, height), "#111418")
+    d = ImageDraw.Draw(img)
+    L, Rr, T, B = 70, 30, 30, 50
+    pw, ph = width - L - Rr, height - T - B
+    yaw_span = max(max(yaws) - min(yaws), 10.0)
+    x0, x1 = min(yaws) - yaw_span * 0.15, max(yaws) + yaw_span * 0.15
+    pmax = max(max(abs(p) for p in pitches), 5.0) * 1.25
+
+    def X(yaw):
+        return L + (yaw - x0) / (x1 - x0) * pw
+
+    def Y(p):
+        return T + (1 - (p + pmax) / (2 * pmax)) * ph
+
+    font = _cjk_font(26) or ImageFont.load_default()
+    d.line([L, Y(0), L + pw, Y(0)], fill="#3a4552", width=2)
+    d.text((8, Y(0) - 16), "0°", fill="#8b95a1", font=font)
+    d.text((8, T), f"+{pmax:.0f}°", fill="#5b6672", font=font)
+    d.text((8, T + ph - 20), f"-{pmax:.0f}°", fill="#5b6672", font=font)
+    for i, (yaw, p) in enumerate(zip(yaws, pitches)):
+        x, y = X(yaw), Y(p)
+        col = colors[i % len(colors)]
+        r = 12 if i == selected else 9
+        d.ellipse([x - r, y - r, x + r, y + r], fill=col,
+                  outline="white" if i == selected else "black",
+                  width=3 if i == selected else 1)
+        d.text((x - 8, y - 34), str(i), fill="white", font=font)
+    cap = "側視圖：橫軸=yaw，縱軸=pitch 代理量（度）" if _cjk_font(26) else \
+        "side view: x=yaw, y=pitch proxy (deg)"
+    d.text((L, height - 38), cap, fill="#8b95a1", font=font)
+    return img
+
+
 class StitchApp(tk.Tk):
     def __init__(self, init_folder: str = ""):
         super().__init__()
@@ -219,7 +300,7 @@ class StitchApp(tk.Tk):
         side.pack_propagate(False)
 
         ttk.Label(side, text="影像清單 (點選=高亮)").pack(anchor=tk.W)
-        self.listbox = tk.Listbox(side, height=9)
+        self.listbox = tk.Listbox(side, height=6)
         self.listbox.pack(fill=tk.X)
         self.listbox.bind("<<ListboxSelect>>", self.on_list_select)
 
@@ -228,8 +309,13 @@ class StitchApp(tk.Tk):
         self.radar.pack()
         ttk.Button(side, text="儲存俯視圖", command=self.save_radar).pack(pady=(2, 0))
 
+        ttk.Label(side, text="側視圖 (yaw-pitch)").pack(anchor=tk.W, pady=(8, 2))
+        self.sideview = SideView(side, width=220, height=110)
+        self.sideview.pack()
+        ttk.Button(side, text="儲存側視圖", command=self.save_side).pack(pady=(2, 0))
+
         ttk.Label(side, text="匹配 inliers / 方法").pack(anchor=tk.W, pady=(8, 2))
-        self.info = tk.Text(side, height=8, width=38, state=tk.DISABLED)
+        self.info = tk.Text(side, height=5, width=38, state=tk.DISABLED)
         self.info.pack(fill=tk.X)
 
         # ---- 狀態列 ----
@@ -270,6 +356,14 @@ class StitchApp(tk.Tk):
             return
         self.after(0, lambda: self.show_result(res))
 
+    def draw_views(self, selected: int = -1):
+        r = self.result
+        if r is None:
+            return
+        cols = self.radar_colors()
+        self.radar.draw(r.yaws, r.filenames, cols, selected=selected)
+        self.sideview.draw(r.yaws, r.pitches, cols, selected=selected)
+
     def show_result(self, res: StitchResult):
         self.result = res
         self.selected = -1
@@ -278,11 +372,10 @@ class StitchApp(tk.Tk):
         self.listbox.delete(0, tk.END)
         for i, n in enumerate(res.filenames):
             self.listbox.insert(tk.END,
-                                f"{i}: {n}  scale={res.scales[i]:.3f}  yaw={res.yaws[i]:+.1f}°")
+                                f"{i}:{n} Y{res.yaws[i]:+.0f}° R{res.rolls[i]:+.0f}° P{res.pitches[i]:+.0f}°")
         self.fit_view()
         self.redraw()
-        self.radar.draw(res.yaws, res.filenames,
-                        [self.colors[i % len(self.colors)] for i in range(len(res.filenames))])
+        self.draw_views()
         inl = "/".join(map(str, res.inliers)) if res.inliers else "-"
         self.set_info(f"方法: {res.method}\n特徵: {res.feature}\n全景: {res.panorama.shape[1]}x{res.panorama.shape[0]}\n"
                       f"inliers(相鄰段): {inl}\n"
@@ -313,6 +406,21 @@ class StitchApp(tk.Tk):
                              self.radar_colors(), selected=self.selected, size=800)
         img.save(p)
         self.status.set(f"俯視圖已儲存：{p}")
+
+    def save_side(self):
+        """把側視圖 (yaw-pitch) 存成 PNG/JPG."""
+        if self.result is None:
+            messagebox.showinfo("提示", "尚無拼接結果")
+            return
+        p = filedialog.asksaveasfilename(defaultextension=".png",
+                                         filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg")])
+        if not p:
+            return
+        img = side_to_image(self.result.yaws, self.result.pitches,
+                            self.radar_colors(), selected=self.selected,
+                            width=800, height=400)
+        img.save(p)
+        self.status.set(f"側視圖已儲存：{p}")
 
     def save_pano(self):
         if self.result is None:
@@ -416,12 +524,11 @@ class StitchApp(tk.Tk):
         if hit >= 0:
             r = self.result
             self.status.set(f"選中 [{hit}] {r.filenames[hit]} ｜ scale={r.scales[hit]:.3f} ｜ "
-                            f"yaw={r.yaws[hit]:+.1f}° ｜ gain={r.gains[hit]:.3f}")
+                            f"yaw={r.yaws[hit]:+.1f}° ｜ roll={r.rolls[hit]:+.1f}° ｜ "
+                            f"pitch~{r.pitches[hit]:+.1f}° ｜ gain={r.gains[hit]:.3f}")
             self.listbox.selection_clear(0, tk.END)
             self.listbox.selection_set(hit)
-            self.radar.draw(r.yaws, r.filenames,
-                            [self.colors[i % len(self.colors)] for i in range(len(r.filenames))],
-                            selected=hit)
+            self.draw_views(selected=hit)
         else:
             self.status.set("未點中任何影像區域")
 
@@ -433,7 +540,6 @@ class StitchApp(tk.Tk):
         self.redraw()
         r = self.result
         i = self.selected
-        self.status.set(f"選中 [{i}] {r.filenames[i]} ｜ scale={r.scales[i]:.3f} ｜ yaw={r.yaws[i]:+.1f}°")
-        self.radar.draw(r.yaws, r.filenames,
-                        [self.colors[k % len(self.colors)] for k in range(len(r.filenames))],
-                        selected=i)
+        self.status.set(f"選中 [{i}] {r.filenames[i]} ｜ scale={r.scales[i]:.3f} ｜ "
+                        f"yaw={r.yaws[i]:+.1f}° ｜ roll={r.rolls[i]:+.1f}° ｜ pitch~{r.pitches[i]:+.1f}°")
+        self.draw_views(selected=i)

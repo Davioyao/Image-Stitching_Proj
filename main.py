@@ -43,7 +43,8 @@ def run_cli(folder: str, width: int, balance: bool, save: str, method: str, feat
     print(f"尺寸: {res.panorama.shape[1]}x{res.panorama.shape[0]}")
     print(f"方法: {res.method} / 特徵: {res.feature}")
     for i, n in enumerate(res.filenames):
-        print(f"[{i}] {n} scale={res.scales[i]:.4f} yaw={res.yaws[i]:+.2f}deg gain={res.gains[i]:.4f}")
+        print(f"[{i}] {n} scale={res.scales[i]:.4f} yaw={res.yaws[i]:+.2f}deg "
+              f"roll={res.rolls[i]:+.2f}deg pitch~{res.pitches[i]:+.2f}deg gain={res.gains[i]:.4f}")
         print(f"    polygon={res.polygons[i].reshape(-1).round(1).tolist()}")
     if res.inliers:
         print(f"inliers: {res.inliers}")
