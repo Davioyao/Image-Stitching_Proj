@@ -1,7 +1,7 @@
 """Image Stitching 拼接引擎：階段二/三/四.
 
 混合式流程 (Hybrid):
-  1. SIFT + BFMatcher + Lowe ratio -> 相鄰影像相對單應性矩陣
+  1. SIFT/ORB + BFMatcher + Lowe ratio -> 相鄰影像相對單應性矩陣
   2. 以中間影像為基準 (reference)，鏈式累積全域 H
   3. 平移正規化 -> 大畫布 Warp
   4. 色彩平衡 ON : GainCompensator + MultiBandBlender
@@ -32,9 +32,25 @@ class StitchResult:
     yaws: list[float] = field(default_factory=list)            # 度，近似值
     gains: list[float] = field(default_factory=list)
     inliers: list[int] = field(default_factory=list)           # 每段相鄰匹配的 inlier 數
-    method: str = "manual"          # manual | stitcher_fallback
+    method: str = "manual"          # manual_* | stitcher_fallback
+    feature: str = "sift"           # sift | orb（手刻鏈用；fallback 為 stitcher-internal）
     work_width: int = 1240
     canvas_size: tuple[int, int] = (0, 0)  # 裁切前 (W, H)
+
+
+def create_detector(name: str):
+    """依名稱建立特徵器，回傳 (detector, bf_norm)。
+
+    sift: SIFT（浮點描述子，NORM_L2），精確但慢，本組實測每張約 7000~8000 關鍵點。
+    orb: ORB / Oriented FAST and Rotated BRIEF（二值描述子，NORM_HAMMING），
+      快數倍，旋轉不變但尺度不變性較弱；nfeatures 開大以免連拍匹配點不足。
+    """
+    name = name.lower()
+    if name == "sift":
+        return cv2.SIFT_create(), cv2.NORM_L2
+    if name == "orb":
+        return cv2.ORB_create(nfeatures=5000), cv2.NORM_HAMMING
+    raise ValueError(f"未知特徵：{name}（可選 sift / orb）")
 
 
 # ----------------------------------------------------------------------------
@@ -62,21 +78,23 @@ def load_images_sorted(folder: str, work_width: int = 1240) -> tuple[list[np.nda
 
 
 def match_pair(gray_a: np.ndarray, gray_b: np.ndarray,
-               sift, ratio: float = 0.75, ransac_thresh: float = 5.0,
+               detector, norm: int, ratio: float = 0.75, ransac_thresh: float = 5.0,
                min_good: int = 10, mode: str = "homography") -> tuple[np.ndarray, int, int]:
     """估計 H_B_to_A：把 B 座標系的點投影到 A 座標系.
 
+    detector/norm 由 create_detector 依 sift/orb 產生（SIFT 用 NORM_L2，
+    ORB 二值描述子用 NORM_HAMMING；其餘流程相同：knnMatch + Lowe ratio）。
     mode="homography": findHomography + RANSAC (架構原文，8 自由度，含透視)；
     mode="affine": estimateAffinePartial2D + RANSAC 後補為 3x3
       （旋轉+等比縮放+平移，4 自由度；實測本組照片透視項會連乘發散，
        affine 鏈畫布 2650x1019、scale 0.9~1.1 才合理，故作為穩定後援）。
     Returns: (H, n_inliers, n_good)
     """
-    ka, da = sift.detectAndCompute(gray_a, None)
-    kb, db = sift.detectAndCompute(gray_b, None)
+    ka, da = detector.detectAndCompute(gray_a, None)
+    kb, db = detector.detectAndCompute(gray_b, None)
     if da is None or db is None or len(ka) < 4 or len(kb) < 4:
-        raise RuntimeError("特徵點不足 (SIFT 回傳空值)")
-    bf = cv2.BFMatcher()
+        raise RuntimeError("特徵點不足 (detectAndCompute 回傳空值)")
+    bf = cv2.BFMatcher(norm)
     pairs = bf.knnMatch(db, da, k=2)  # query=B, train=A
     good = [m for m, n in pairs if m.distance < ratio * n.distance]
     if len(good) < min_good:
@@ -220,11 +238,11 @@ def _chain_and_canvas(images: list[np.ndarray], rel_H: list[np.ndarray],
 
 def stitch_manual(images: list[np.ndarray], filenames: list[str],
                   work_width: int, color_balance: bool,
-                  ratio: float = 0.75) -> StitchResult:
+                  ratio: float = 0.75, feature: str = "sift") -> StitchResult:
     n = len(images)
     if n < 2:
         raise ValueError("至少需要 2 張影像")
-    sift = cv2.SIFT_create()
+    detector, norm = create_detector(feature)
     grays = [cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) for im in images]
     ref = n // 2
 
@@ -240,7 +258,7 @@ def stitch_manual(images: list[np.ndarray], filenames: list[str],
         try:
             rel_H, inlier_list = [], []
             for i in range(n - 1):
-                H, inl, _ngood = match_pair(grays[i], grays[i + 1], sift,
+                H, inl, _ngood = match_pair(grays[i], grays[i + 1], detector, norm,
                                             ratio=ratio, mode=mode)
                 rel_H.append(H)
                 inlier_list.append(inl)
@@ -276,6 +294,7 @@ def stitch_manual(images: list[np.ndarray], filenames: list[str],
                         H_globals=H_globals, polygons=polygons,
                         scales=scales, yaws=yaws, gains=gains,
                         inliers=inlier_list, method=method_used,
+                        feature=feature.lower(),
                         work_width=work_width, canvas_size=(W, Hc))
 
 
@@ -284,6 +303,7 @@ def stitch_manual(images: list[np.ndarray], filenames: list[str],
 # ----------------------------------------------------------------------------
 def stitch_fallback(images: list[np.ndarray], filenames: list[str],
                     work_width: int, color_balance: bool) -> StitchResult:
+    """注意：fallback 走 Stitcher 內部管線，feature 選項對其無效."""
     mode = cv2.Stitcher_PANORAMA
     stitcher = cv2.Stitcher_create(mode)
     # Stitcher 內部已有曝光補償；OFF 時嘗試關閉以體現差異
@@ -316,6 +336,7 @@ def stitch_fallback(images: list[np.ndarray], filenames: list[str],
     return StitchResult(panorama=pano, filenames=filenames, H_globals=Hg,
                         polygons=polygons, scales=scales, yaws=yaws,
                         gains=[1.0] * n, inliers=[], method="stitcher_fallback",
+                        feature="stitcher-internal",
                         work_width=work_width, canvas_size=(W, H))
 
 
@@ -324,13 +345,14 @@ def stitch_fallback(images: list[np.ndarray], filenames: list[str],
 # ----------------------------------------------------------------------------
 def stitch_folder(folder: str, work_width: int = 1240,
                   color_balance: bool = True, ratio: float = 0.75,
-                  method: str = "auto") -> StitchResult:
-    """method: auto=手刻優先、失敗轉 Stitcher；manual=只用手刻鏈；stitcher=只用 Stitcher."""
+                  method: str = "auto", feature: str = "sift") -> StitchResult:
+    """method: auto=手刻優先、失敗轉 Stitcher；manual=只用手刻鏈；stitcher=只用 Stitcher.
+    feature: sift | orb，手刻鏈的特徵器（fallback 內部管線不受影響）。"""
     images, filenames = load_images_sorted(folder, work_width)
     if method == "stitcher":
         return stitch_fallback(images, filenames, work_width, color_balance)
     try:
-        return stitch_manual(images, filenames, work_width, color_balance, ratio)
+        return stitch_manual(images, filenames, work_width, color_balance, ratio, feature)
     except Exception as e:
         if method == "manual":
             raise

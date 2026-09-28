@@ -191,6 +191,11 @@ class StitchApp(tk.Tk):
                                        state="readonly",
                                        values=["自動(手刻優先)", "手刻鏈", "Stitcher"])
         self.method_box.pack(side=tk.LEFT, padx=2)
+        ttk.Label(bar2, text="特徵:").pack(side=tk.LEFT, padx=(8, 0))
+        self.feature_var = tk.StringVar(value="SIFT")
+        self.feature_box = ttk.Combobox(bar2, textvariable=self.feature_var, width=6,
+                                        state="readonly", values=["SIFT", "ORB"])
+        self.feature_box.pack(side=tk.LEFT, padx=2)
         ttk.Button(bar2, text="開始拼接", command=self.run_stitch_async).pack(side=tk.LEFT, padx=(8, 4))
         ttk.Button(bar2, text="儲存全景", command=self.save_pano).pack(side=tk.LEFT, padx=2)
         ttk.Button(bar2, text="儲存俯視圖", command=self.save_radar).pack(side=tk.LEFT, padx=2)
@@ -245,19 +250,20 @@ class StitchApp(tk.Tk):
         if not folder or not os.path.isdir(folder):
             messagebox.showerror("錯誤", "請先選擇有效的影像資料夾")
             return
-        self.status.set("拼接中 ... (SIFT 運算需數十秒)")
+        self.status.set("拼接中 ... (特徵運算需數十秒)")
         self.update_idletasks()
         t = threading.Thread(target=self._stitch_job,
                              args=(folder, int(self.width_var.get()),
                                    bool(self.balance_var.get()),
-                                   self.METHOD_MAP.get(self.method_var.get(), "auto")),
+                                   self.METHOD_MAP.get(self.method_var.get(), "auto"),
+                                   self.feature_var.get().lower()),
                              daemon=True)
         t.start()
 
-    def _stitch_job(self, folder, width, balance, method="auto"):
+    def _stitch_job(self, folder, width, balance, method="auto", feature="sift"):
         try:
             res = stitch_folder(folder, work_width=width, color_balance=balance,
-                                method=method)
+                                method=method, feature=feature)
         except Exception as e:  # noqa: BLE001
             self.after(0, lambda: messagebox.showerror("拼接失敗", str(e)))
             self.after(0, lambda: self.status.set(f"失敗：{e}"))
@@ -278,7 +284,7 @@ class StitchApp(tk.Tk):
         self.radar.draw(res.yaws, res.filenames,
                         [self.colors[i % len(self.colors)] for i in range(len(res.filenames))])
         inl = "/".join(map(str, res.inliers)) if res.inliers else "-"
-        self.set_info(f"方法: {res.method}\n全景: {res.panorama.shape[1]}x{res.panorama.shape[0]}\n"
+        self.set_info(f"方法: {res.method}\n特徵: {res.feature}\n全景: {res.panorama.shape[1]}x{res.panorama.shape[0]}\n"
                       f"inliers(相鄰段): {inl}\n"
                       f"gains: {' '.join(f'{g:.3f}' for g in res.gains)}\n"
                       f"色彩平衡: {'ON' if self.balance_var.get() else 'OFF'}")

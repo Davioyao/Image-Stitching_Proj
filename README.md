@@ -11,6 +11,24 @@
 
 `Result/` 另有手刻鏈全景（`Full_View.jpeg`）與雷達俯視圖存檔（`Bird-view.png`）。
 
+## 演算法
+
+**特徵＋匹配（手刻鏈）**
+
+- 特徵點：`cv2.SIFT_create()`，實測每張約 7000~8000 個關鍵點；
+  或切換 `ORB`（Oriented FAST and Rotated BRIEF），快數倍，適合快速預覽
+- 匹配：BFMatcher＋`knnMatch(k=2)`＋Lowe ratio 0.75（ORB 用 Hamming 距離）
+
+**幾何變換（兩段式）**
+
+- 優先 `findHomography`＋RANSAC（8 自由度含透視）
+- 發散時轉 `estimateAffinePartial2D`＋RANSAC（4 自由度：旋轉＋等比縮放＋平移）
+
+**色彩＋融合**
+
+- ON：`GainCompensator`＋`MultiBandBlender`
+- OFF：重疊區算術平均（對照用）
+
 ## 環境安裝
 
 ```bash
@@ -42,4 +60,5 @@ python main.py --cli --method stitcher --save pano_st.jpg
 |---|---|
 | `--width` | 工作寬度 px（預設 1240）：先等比縮圖再拼接，越大越細但越慢 |
 | `--method` | `auto`（手刻優先、失敗轉 Stitcher）／`manual`／`stitcher` |
+| `--feature` | 手刻鏈特徵器：`sift`（預設，精確）／`orb`（快速預覽） |
 | `--no-balance` | 關閉色彩平衡，改簡單平均（接縫對照用） |
