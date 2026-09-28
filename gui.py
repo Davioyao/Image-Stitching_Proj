@@ -84,9 +84,8 @@ def radar_to_image(yaws: list[float], names: list[str], colors: list[str],
                txt, fill="white", font=font_idx)
     d.ellipse([cx - 10, cy - 10, cx + 10, cy + 10], fill="white", outline="black")
     d.text((cx - 70, 10), "N (ref=0°)", fill="#8b95a1", font=font_cap)
-    cap = "圓心=拍攝者，扇形=各照片拍攝方向 (Yaw 近似值)" if _cjk_font(24) else \
-        "center=photographer, sectors=shooting dirs (approx yaw)"
-    d.text((12, size - 36), cap, fill="#8b95a1", font=font_cap)
+    d.text((12, size - 36), "center=photographer, sectors=shooting dirs (approx yaw)",
+           fill="#8b95a1", font=font_cap)
     return img
 
 
@@ -221,16 +220,15 @@ def side_to_image(yaws: list[float], pitches: list[float], colors: list[str],
                   outline="white" if i == selected else "black",
                   width=3 if i == selected else 1)
         d.text((x - 8, y - 34), str(i), fill="white", font=font)
-    cap = "側視圖：橫軸=yaw，縱軸=pitch 代理量（度）" if _cjk_font(26) else \
-        "side view: x=yaw, y=pitch proxy (deg)"
-    d.text((L, height - 38), cap, fill="#8b95a1", font=font)
+    d.text((L, height - 38), "side view: x=yaw, y=pitch proxy (deg)",
+           fill="#8b95a1", font=font)
     return img
 
 
 class StitchApp(tk.Tk):
     def __init__(self, init_folder: str = ""):
         super().__init__()
-        self.title("Image Stitching — 拼接 + 色彩平衡 + 拍照區域逆推")
+        self.title("Image Stitching — Panorama + Color Balance + Pose Estimation")
         self.geometry("1240x760")
 
         self.result: StitchResult | None = None
@@ -249,37 +247,36 @@ class StitchApp(tk.Tk):
         # ---- 工具列第 1 列：資料夾 ----
         bar1 = ttk.Frame(self)
         bar1.pack(side=tk.TOP, fill=tk.X, padx=6, pady=(4, 0))
-        ttk.Label(bar1, text="資料夾:").pack(side=tk.LEFT)
+        ttk.Label(bar1, text="Folder:").pack(side=tk.LEFT)
         self.folder_var = tk.StringVar(value=init_folder)
         ttk.Entry(bar1, textvariable=self.folder_var, width=52).pack(side=tk.LEFT, padx=4)
-        ttk.Button(bar1, text="選擇資料夾", command=self.select_folder).pack(side=tk.LEFT)
+        ttk.Button(bar1, text="Browse...", command=self.select_folder).pack(side=tk.LEFT)
 
         # ---- 工具列第 2 列：參數 + 動作（獨立一列，視窗窄也不會被擠掉）----
         bar2 = ttk.Frame(self)
         bar2.pack(side=tk.TOP, fill=tk.X, padx=6, pady=(2, 4))
-        ttk.Label(bar2, text="工作寬度(px):").pack(side=tk.LEFT)
+        ttk.Label(bar2, text="Work width (px):").pack(side=tk.LEFT)
         self.width_var = tk.IntVar(value=1240)
         ttk.Spinbox(bar2, from_=400, to=2000, increment=100,
                     textvariable=self.width_var, width=7).pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(bar2, text="降採樣拼接，越大越細但越慢",
+        ttk.Label(bar2, text="downsampled; larger = finer but slower",
                   foreground="gray").pack(side=tk.LEFT, padx=(4, 8))
         self.balance_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(bar2, text="啟用色彩平衡 (Gain+Multiband)",
+        ttk.Checkbutton(bar2, text="Color balance (Gain+Multiband)",
                         variable=self.balance_var).pack(side=tk.LEFT)
-        ttk.Label(bar2, text="方法:").pack(side=tk.LEFT, padx=(8, 0))
-        self.method_var = tk.StringVar(value="自動(手刻優先)")
-        self.method_box = ttk.Combobox(bar2, textvariable=self.method_var, width=14,
+        ttk.Label(bar2, text="Method:").pack(side=tk.LEFT, padx=(8, 0))
+        self.method_var = tk.StringVar(value="auto")
+        self.method_box = ttk.Combobox(bar2, textvariable=self.method_var, width=10,
                                        state="readonly",
-                                       values=["自動(手刻優先)", "手刻鏈", "Stitcher"])
+                                       values=["auto", "manual", "stitcher"])
         self.method_box.pack(side=tk.LEFT, padx=2)
-        ttk.Label(bar2, text="特徵:").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(bar2, text="Features:").pack(side=tk.LEFT, padx=(8, 0))
         self.feature_var = tk.StringVar(value="SIFT")
         self.feature_box = ttk.Combobox(bar2, textvariable=self.feature_var, width=6,
                                         state="readonly", values=["SIFT", "ORB"])
         self.feature_box.pack(side=tk.LEFT, padx=2)
-        ttk.Button(bar2, text="開始拼接", command=self.run_stitch_async).pack(side=tk.LEFT, padx=(8, 4))
-        ttk.Button(bar2, text="儲存全景", command=self.save_pano).pack(side=tk.LEFT, padx=2)
-        ttk.Button(bar2, text="儲存俯視圖", command=self.save_radar).pack(side=tk.LEFT, padx=2)
+        ttk.Button(bar2, text="Start Stitching", command=self.run_stitch_async).pack(side=tk.LEFT, padx=(8, 4))
+        ttk.Button(bar2, text="Save Panorama", command=self.save_pano).pack(side=tk.LEFT, padx=2)
 
         # ---- 主區 ----
         main = ttk.Frame(self)
@@ -299,27 +296,27 @@ class StitchApp(tk.Tk):
         side.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
         side.pack_propagate(False)
 
-        ttk.Label(side, text="影像清單 (點選=高亮)").pack(anchor=tk.W)
+        ttk.Label(side, text="Images (click to highlight)").pack(anchor=tk.W)
         self.listbox = tk.Listbox(side, height=6)
         self.listbox.pack(fill=tk.X)
         self.listbox.bind("<<ListboxSelect>>", self.on_list_select)
 
-        ttk.Label(side, text="雷達圖 (拍照區域逆推)").pack(anchor=tk.W, pady=(8, 2))
+        ttk.Label(side, text="Radar (shooting directions)").pack(anchor=tk.W, pady=(8, 2))
         self.radar = RadarView(side, size=220)
         self.radar.pack()
-        ttk.Button(side, text="儲存俯視圖", command=self.save_radar).pack(pady=(2, 0))
+        ttk.Button(side, text="Save Top View", command=self.save_radar).pack(pady=(2, 0))
 
-        ttk.Label(side, text="側視圖 (yaw-pitch)").pack(anchor=tk.W, pady=(8, 2))
+        ttk.Label(side, text="Side View (yaw-pitch)").pack(anchor=tk.W, pady=(8, 2))
         self.sideview = SideView(side, width=220, height=110)
         self.sideview.pack()
-        ttk.Button(side, text="儲存側視圖", command=self.save_side).pack(pady=(2, 0))
+        ttk.Button(side, text="Save Side View", command=self.save_side).pack(pady=(2, 0))
 
-        ttk.Label(side, text="匹配 inliers / 方法").pack(anchor=tk.W, pady=(8, 2))
+        ttk.Label(side, text="Match Inliers / Info").pack(anchor=tk.W, pady=(8, 2))
         self.info = tk.Text(side, height=5, width=38, state=tk.DISABLED)
         self.info.pack(fill=tk.X)
 
         # ---- 狀態列 ----
-        self.status = tk.StringVar(value="就緒：選擇 Pic 資料夾後按「開始拼接」")
+        self.status = tk.StringVar(value="Ready: choose the Pic folder, then Start Stitching")
         ttk.Label(self, textvariable=self.status, relief=tk.SUNKEN,
                   anchor=tk.W).pack(side=tk.BOTTOM, fill=tk.X)
 
@@ -329,14 +326,14 @@ class StitchApp(tk.Tk):
         if d:
             self.folder_var.set(d)
 
-    METHOD_MAP = {"自動(手刻優先)": "auto", "手刻鏈": "manual", "Stitcher": "stitcher"}
+    METHOD_MAP = {"auto": "auto", "manual": "manual", "stitcher": "stitcher"}
 
     def run_stitch_async(self):
         folder = self.folder_var.get().strip()
         if not folder or not os.path.isdir(folder):
-            messagebox.showerror("錯誤", "請先選擇有效的影像資料夾")
+            messagebox.showerror("Error", "Please choose a valid image folder")
             return
-        self.status.set("拼接中 ... (特徵運算需數十秒)")
+        self.status.set("Stitching... (may take tens of seconds)")
         self.update_idletasks()
         t = threading.Thread(target=self._stitch_job,
                              args=(folder, int(self.width_var.get()),
@@ -351,8 +348,8 @@ class StitchApp(tk.Tk):
             res = stitch_folder(folder, work_width=width, color_balance=balance,
                                 method=method, feature=feature)
         except Exception as e:  # noqa: BLE001
-            self.after(0, lambda: messagebox.showerror("拼接失敗", str(e)))
-            self.after(0, lambda: self.status.set(f"失敗：{e}"))
+            self.after(0, lambda: messagebox.showerror("Stitching failed", str(e)))
+            self.after(0, lambda: self.status.set(f"Failed: {e}"))
             return
         self.after(0, lambda: self.show_result(res))
 
@@ -377,11 +374,11 @@ class StitchApp(tk.Tk):
         self.redraw()
         self.draw_views()
         inl = "/".join(map(str, res.inliers)) if res.inliers else "-"
-        self.set_info(f"方法: {res.method}\n特徵: {res.feature} / 縫線: {res.seam}\n全景: {res.panorama.shape[1]}x{res.panorama.shape[0]}\n"
-                      f"inliers(相鄰段): {inl}\n"
+        self.set_info(f"method: {res.method}\nfeatures: {res.feature} / seam: {res.seam}\nPanorama: {res.panorama.shape[1]}x{res.panorama.shape[0]}\n"
+                      f"inliers(segments): {inl}\n"
                       f"gains: {' '.join(f'{g:.3f}' for g in res.gains)}\n"
-                      f"色彩平衡: {'ON' if self.balance_var.get() else 'OFF'}")
-        self.status.set(f"完成：{len(res.filenames)} 張，{res.method}，滾輪縮放 / 拖拽平移 / 點擊高亮")
+                      f"balance: {'ON' if self.balance_var.get() else 'OFF'}")
+        self.status.set(f"Done: {len(res.filenames)} images, {res.method}. Wheel=zoom, drag=pan, click=highlight")
 
     def set_info(self, text: str):
         self.info.config(state=tk.NORMAL)
@@ -396,7 +393,7 @@ class StitchApp(tk.Tk):
     def save_radar(self):
         """把雷達逆推俯視圖存成 PNG/JPG（與畫面同映射、可重現）。"""
         if self.result is None:
-            messagebox.showinfo("提示", "尚無拼接結果")
+            messagebox.showinfo("Info", "No result yet")
             return
         p = filedialog.asksaveasfilename(defaultextension=".png",
                                          filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg")])
@@ -405,12 +402,12 @@ class StitchApp(tk.Tk):
         img = radar_to_image(self.result.yaws, self.result.filenames,
                              self.radar_colors(), selected=self.selected, size=800)
         img.save(p)
-        self.status.set(f"俯視圖已儲存：{p}")
+        self.status.set(f"Top view saved: {p}")
 
     def save_side(self):
         """把側視圖 (yaw-pitch) 存成 PNG/JPG."""
         if self.result is None:
-            messagebox.showinfo("提示", "尚無拼接結果")
+            messagebox.showinfo("Info", "No result yet")
             return
         p = filedialog.asksaveasfilename(defaultextension=".png",
                                          filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg")])
@@ -420,17 +417,17 @@ class StitchApp(tk.Tk):
                             self.radar_colors(), selected=self.selected,
                             width=800, height=400)
         img.save(p)
-        self.status.set(f"側視圖已儲存：{p}")
+        self.status.set(f"Side view saved: {p}")
 
     def save_pano(self):
         if self.result is None:
-            messagebox.showinfo("提示", "尚無拼接結果")
+            messagebox.showinfo("Info", "No result yet")
             return
         p = filedialog.asksaveasfilename(defaultextension=".jpg",
                                          filetypes=[("JPEG", "*.jpg"), ("PNG", "*.png")])
         if p:
             cv2.imwrite(p, self.result.panorama)
-            self.status.set(f"已儲存：{p}")
+            self.status.set(f"Panorama saved: {p}")
 
     # -- 視圖變換 --
     def fit_view(self):
@@ -453,7 +450,7 @@ class StitchApp(tk.Tk):
         self.canvas.delete("all")
         self.poly_ids = []
         if self.photo_bgr is None or self.result is None:
-            self.canvas.create_text(300, 200, text="尚無結果", fill="gray")
+            self.canvas.create_text(300, 200, text="No result", fill="gray")
             return
         ph, pw = self.photo_bgr.shape[:2]
         dw, dh = max(1, int(pw * self.view_scale)), max(1, int(ph * self.view_scale))
@@ -523,14 +520,14 @@ class StitchApp(tk.Tk):
         self.redraw()
         if hit >= 0:
             r = self.result
-            self.status.set(f"選中 [{hit}] {r.filenames[hit]} ｜ scale={r.scales[hit]:.3f} ｜ "
-                            f"yaw={r.yaws[hit]:+.1f}° ｜ roll={r.rolls[hit]:+.1f}° ｜ "
-                            f"pitch~{r.pitches[hit]:+.1f}° ｜ gain={r.gains[hit]:.3f}")
+            self.status.set(f"Selected [{hit}] {r.filenames[hit]} | scale={r.scales[hit]:.3f} | "
+                            f"yaw={r.yaws[hit]:+.1f}° | roll={r.rolls[hit]:+.1f}° | "
+                            f"pitch~{r.pitches[hit]:+.1f}° | gain={r.gains[hit]:.3f}")
             self.listbox.selection_clear(0, tk.END)
             self.listbox.selection_set(hit)
             self.draw_views(selected=hit)
         else:
-            self.status.set("未點中任何影像區域")
+            self.status.set("No image region hit")
 
     def on_list_select(self, _e):
         sel = self.listbox.curselection()
@@ -540,6 +537,6 @@ class StitchApp(tk.Tk):
         self.redraw()
         r = self.result
         i = self.selected
-        self.status.set(f"選中 [{i}] {r.filenames[i]} ｜ scale={r.scales[i]:.3f} ｜ "
-                        f"yaw={r.yaws[i]:+.1f}° ｜ roll={r.rolls[i]:+.1f}° ｜ pitch~{r.pitches[i]:+.1f}°")
+        self.status.set(f"Selected [{i}] {r.filenames[i]} | scale={r.scales[i]:.3f} | "
+                        f"yaw={r.yaws[i]:+.1f}° | roll={r.rolls[i]:+.1f}° | pitch~{r.pitches[i]:+.1f}°")
         self.draw_views(selected=i)
