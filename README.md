@@ -11,31 +11,6 @@
 
 `Result/` 另含各拼接模式的對照輸出；App 畫面見上方截圖（`Image-stitching-app.png`）。
 
-## 演算法
-
-**特徵＋匹配（手刻鏈）**
-
-- 特徵點：`cv2.SIFT_create()`，實測每張約 7000~8000 個關鍵點；
-  或切換 `ORB`（Oriented FAST and Rotated BRIEF），快數倍，適合快速預覽
-- 匹配：BFMatcher＋`knnMatch(k=2)`＋Lowe ratio 0.75（ORB 用 Hamming 距離）
-
-**幾何變換（兩段式）**
-
-- 優先 `findHomography`＋RANSAC（8 自由度含透視）
-- 發散時轉 `estimateAffinePartial2D`＋RANSAC（4 自由度：旋轉＋等比縮放＋平移）
-
-**姿態逆推（yaw／roll／pitch）**
-
-- yaw：多邊形中心水平位移近似；roll：H 面內旋轉分量直讀；
-  pitch：垂直位移代理量（皆未標定，近似值）。GUI 另有 yaw-pitch 側視圖
-
-**色彩＋融合**
-
-- ON：`GainCompensator`＋中線縫＋`MultiBandBlender`
-- OFF：重疊區算術平均（對照用）
-- 縫線：重疊區每像素只取一張圖（最近 mask 質心者），消除錯位重影；
-  自行實作（`stitcher._find_seams`，聯集守恆），`--seam none` 可關閉對照
-
 ## 環境安裝
 
 ```bash
