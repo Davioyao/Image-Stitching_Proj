@@ -258,9 +258,7 @@ class StitchApp(tk.Tk):
         ttk.Label(bar2, text="Work width (px):").pack(side=tk.LEFT)
         self.width_var = tk.IntVar(value=1240)
         ttk.Spinbox(bar2, from_=400, to=2000, increment=100,
-                    textvariable=self.width_var, width=7).pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(bar2, text="downsampled; larger = finer but slower",
-                  foreground="gray").pack(side=tk.LEFT, padx=(4, 8))
+                    textvariable=self.width_var, width=7).pack(side=tk.LEFT, padx=(2, 8))
         self.balance_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(bar2, text="Color balance (Gain+Multiband)",
                         variable=self.balance_var).pack(side=tk.LEFT)
