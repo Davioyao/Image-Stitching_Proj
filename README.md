@@ -9,7 +9,7 @@
 
 ![Stitcher 全景輸出](Result/Stitcher_Full.jpeg)
 
-`Result/` 另有手刻鏈全景（`Full_View.jpeg`）與雷達俯視圖存檔（`Bird-view.png`）。
+`Result/` 另含各拼接模式的對照輸出；App 畫面見上方截圖（`Image-stitching-app.png`）。
 
 ## 演算法
 
